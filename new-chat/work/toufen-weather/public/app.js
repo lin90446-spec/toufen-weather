@@ -119,6 +119,7 @@ function drawBars(svg, points) {
 
 function render(data) {
   const current = data.current || {};
+  const summary = data.observationSummary || {};
   setText("obsTime", `觀測時間 ${current.time || "--"}`);
   setText("currentTemp", current.temp);
   $("currentTemp").className = tempClass(current.temp);
@@ -133,6 +134,19 @@ function render(data) {
   $("rain").className = rainClass(current.rain);
   setText("timeRange", data.plot24?.timeRange || "--");
   setText("lastUpdated", `頁面更新 ${fmtTime(data.updatedAt)}`);
+
+  setText("maxTemp", `${summary.maxTemp?.value ?? "--"}°C`);
+  $("maxTemp").className = tempClass(summary.maxTemp?.value);
+  setText("maxTempTime", `觀測時間 ${summary.maxTemp?.time || "--"}`);
+  setText("minTemp", `${summary.minTemp?.value ?? "--"}°C`);
+  $("minTemp").className = tempClass(summary.minTemp?.value);
+  setText("minTempTime", `觀測時間 ${summary.minTemp?.time || "--"}`);
+  setText("maxWind", `${summary.maxWind?.value ?? "--"} m/s`);
+  $("maxWind").className = windClass(summary.maxWind?.value);
+  setText("maxWindTime", `觀測時間 ${summary.maxWind?.time || "--"}`);
+  setText("maxGust", `${summary.maxGust?.value ?? "--"} m/s`);
+  $("maxGust").className = windClass(summary.maxGust?.value);
+  setText("maxGustTime", `觀測時間 ${summary.maxGust?.time || "--"}`);
 
   const points = data.plot24?.points || [];
   drawLine($("tempChart"), points, "temp", "°C", "line-temp", "#d47a1f");

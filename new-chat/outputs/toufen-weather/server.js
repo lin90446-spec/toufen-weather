@@ -47,6 +47,32 @@ function pick(regex, text, fallback = "-") {
   return match ? stripTags(match[1]) : fallback;
 }
 
+function toNumber(value) {
+  const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extreme(rows, field, mode) {
+  const valid = rows
+    .map((row) => ({ time: row.time, value: toNumber(row[field]) }))
+    .filter((row) => row.value !== null);
+  if (!valid.length) return { value: "-", time: "-" };
+
+  return valid.reduce((best, row) => {
+    if (mode === "min") return row.value < best.value ? row : best;
+    return row.value > best.value ? row : best;
+  }, valid[0]);
+}
+
+function observationSummary(rows) {
+  return {
+    maxTemp: extreme(rows, "temp", "max"),
+    minTemp: extreme(rows, "temp", "min"),
+    maxWind: extreme(rows, "windSpeed", "max"),
+    maxGust: extreme(rows, "gust", "max"),
+  };
+}
+
 function parseStationRows(html) {
   return [...html.matchAll(/<tr\b([^>]*)>([\s\S]*?)<\/tr>/gi)].map((match) => {
     const attrs = match[1];
@@ -167,6 +193,7 @@ async function apiData() {
     },
     updatedAt: new Date().toISOString(),
     current: observations[0] || null,
+    observationSummary: observationSummary(observations),
     observations,
     plot24: parsePlotScript(plotHtml),
     forecast72: parseForecast(forecastHtml),
