@@ -73,6 +73,58 @@ function observationSummary(rows) {
   };
 }
 
+function valueFromWindCell(html) {
+  const values = stripTags(html).match(/-?\d+(?:\.\d+)?/g) || [];
+  return values.length ? Number(values[values.length - 1]) : null;
+}
+
+function parseWindSpeed(html) {
+  const headerRow = html.match(/<table[^>]*id=StationTable[^>]*>[\s\S]*?<tr>([\s\S]*?)<\/tr>/i)?.[1] || "";
+  const slots = [...headerRow.matchAll(/<th\b[^>]*colspan=3[^>]*>([\s\S]*?)<\/th>/gi)]
+    .map((m) => stripTags(m[1]))
+    .filter((label) => /^\d{2}\/\d{2}/.test(label));
+
+  const dataRow = html.match(/<tbody[^>]*id=StationData[^>]*>\s*<tr[^>]*>([\s\S]*?)<\/tr>/i)?.[1] || "";
+  const cells = [...dataRow.matchAll(/<td\b([^>]*)>([\s\S]*?)<\/td>/gi)].slice(2);
+  const records = [];
+
+  for (let i = 0; i < Math.min(slots.length, Math.floor(cells.length / 3)); i++) {
+    const wd = cells[i * 3];
+    const wind = cells[i * 3 + 1];
+    const gust = cells[i * 3 + 2];
+    records.push({
+      slotTime: slots[i],
+      windDirection: pick(/(?:title|alt)=['"]([^'"]+)['"]/i, wd[2], "-"),
+      windSpeed: valueFromWindCell(wind[2]),
+      windTime: pick(/title=['"]([^'"]+)['"]/i, wind[1], slots[i]),
+      gust: valueFromWindCell(gust[2]),
+      gustTime: pick(/title=['"]([^'"]+)['"]/i, gust[1], slots[i]),
+    });
+  }
+
+  const maxRecord = (field, timeField) => {
+    const valid = records.filter((row) => row[field] !== null);
+    if (!valid.length) return { value: "-", time: "-" };
+    const best = valid.reduce((acc, row) => (row[field] > acc[field] ? row : acc), valid[0]);
+    return { value: best[field], time: best[timeField] || best.slotTime };
+  };
+
+  const latest = records[0] || null;
+  return {
+    updatedAt: pick(/var UpdateTime = '([^']+)'/i, html, ""),
+    latest: latest ? {
+      windDirection: latest.windDirection,
+      windSpeed: latest.windSpeed,
+      windTime: latest.windTime,
+      gust: latest.gust,
+      gustTime: latest.gustTime,
+    } : null,
+    records,
+    maxWind: maxRecord("windSpeed", "windTime"),
+    maxGust: maxRecord("gust", "gustTime"),
+  };
+}
+
 function parseStationRows(html) {
   return [...html.matchAll(/<tr\b([^>]*)>([\s\S]*?)<\/tr>/gi)].map((match) => {
     const attrs = match[1];
@@ -180,21 +232,34 @@ function parseForecast(html) {
 
 async function apiData() {
   const now = Date.now();
-  const [stationHtml, plotHtml, forecastHtml] = await Promise.all([
+  const [stationHtml, plotHtml, forecastHtml, windHtml] = await Promise.all([
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24hr/${STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24plot/Plot24_${STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Town/MOD/3hr/${TOWN_ID}_3hr_PC.html?T=${now}`),
+    fetchText(`${CWA}/V8/C/W/WindSpeed/MOD/plot/${STATION_ID}.html?T=${now}`),
   ]);
   const observations = parseStationRows(stationHtml);
+  const windSpeed = parseWindSpeed(windHtml);
+  const current = observations[0] || null;
+  if (current && windSpeed.latest) {
+    current.windDirection = windSpeed.latest.windDirection || current.windDirection;
+    current.windSpeed = windSpeed.latest.windSpeed ?? current.windSpeed;
+    current.gust = windSpeed.latest.gust ?? current.gust;
+  }
+  const summary = observationSummary(observations);
+  summary.maxWind = windSpeed.maxWind;
+  summary.maxGust = windSpeed.maxGust;
   return {
     source: {
       station: `${CWA}/V8/C/W/OBS_Station.html?ID=${STATION_ID}`,
       forecast: `${CWA}/V8/C/W/Town/Town.html?TID=${TOWN_ID}`,
+      windSpeed: `${CWA}/V8/C/W/WindSpeed/WindSpeed_All.html?CID=10005&StationID=${STATION_ID}`,
     },
     updatedAt: new Date().toISOString(),
-    current: observations[0] || null,
-    observationSummary: observationSummary(observations),
+    current,
+    observationSummary: summary,
     observations,
+    windSpeed,
     plot24: parsePlotScript(plotHtml),
     forecast72: parseForecast(forecastHtml),
   };
