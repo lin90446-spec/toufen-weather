@@ -51,6 +51,28 @@ function rainClass(value) {
   return "rain-blue";
 }
 
+function aqiClass(value) {
+  const n = numeric(value);
+  if (n === null) return "";
+  if (n >= 301) return "aqi-brown";
+  if (n >= 201) return "aqi-purple";
+  if (n >= 151) return "aqi-red";
+  if (n >= 101) return "aqi-orange";
+  if (n >= 51) return "aqi-yellow";
+  if (n >= 0) return "aqi-green";
+  return "";
+}
+
+function uviClass(value) {
+  const n = numeric(value);
+  if (n === null) return "";
+  if (n >= 11) return "uvi-purple";
+  if (n >= 8) return "uvi-red";
+  if (n >= 6) return "uvi-orange";
+  if (n >= 3) return "uvi-yellow";
+  return "uvi-green";
+}
+
 function badge(value, className, suffix = "") {
   const text = `${value || "--"}${value && value !== "-" ? suffix : ""}`;
   return `<span class="metric ${className}">${text}</span>`;
@@ -135,6 +157,25 @@ function render(data) {
   setText("timeRange", data.plot24?.timeRange || "--");
   setText("lastUpdated", `頁面更新 ${fmtTime(data.updatedAt)}`);
 
+  const air = data.airQuality || {};
+  setText("envUpdated", air.time ? `空品 ${air.time} / UVI ${data.uvi?.timeTo || "--"}` : `UVI ${data.uvi?.timeTo || "--"}`);
+  setText("aqi", air.aqi || "--");
+  $("aqi").className = aqiClass(air.aqi);
+  setText("aqiCondition", air.condition || "--");
+  setText("aqiPollutant", air.pollutant ? `指標污染物：${air.pollutant}` : "無主要指標污染物");
+  setText("pm25", air.pm25 || "--");
+  setText("pm10", air.pm10 || "--");
+  setText("o3", air.o3 || "--");
+
+  const hsinchu = data.uvi?.stations?.["46757"];
+  const houlong = data.uvi?.stations?.["46728"];
+  setText("uviHsinchu", hsinchu?.latest?.value ?? "--");
+  $("uviHsinchu").className = uviClass(hsinchu?.latest?.value);
+  setText("uviHsinchuMax", `今日最大 ${hsinchu?.max?.value ?? "--"} (${hsinchu?.max?.hour || "--"}時)`);
+  setText("uviHoulong", houlong?.latest?.value ?? "--");
+  $("uviHoulong").className = uviClass(houlong?.latest?.value);
+  setText("uviHoulongMax", `今日最大 ${houlong?.max?.value ?? "--"} (${houlong?.max?.hour || "--"}時)`);
+
   setText("maxTemp", `${summary.maxTemp?.value ?? "--"}°C`);
   $("maxTemp").className = tempClass(summary.maxTemp?.value);
   setText("maxTempTime", `觀測時間 ${summary.maxTemp?.time || "--"}`);
@@ -169,11 +210,13 @@ function render(data) {
 async function load() {
   $("refresh").disabled = true;
   try {
-    const res = await fetch(`/api/weather?t=${Date.now()}`);
+    const apiBase = window.location.protocol === "file:" ? "http://localhost:4174/api/weather" : "/api/weather";
+    const res = await fetch(`${apiBase}?t=${Date.now()}`);
     if (!res.ok) throw new Error("讀取資料失敗");
     render(await res.json());
   } catch (error) {
-    setText("obsTime", error.message);
+    const hint = window.location.protocol === "file:" ? "請改開 http://localhost:4174/ 或先啟動本機服務" : error.message;
+    setText("obsTime", hint);
   } finally {
     $("refresh").disabled = false;
   }

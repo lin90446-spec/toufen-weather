@@ -6,8 +6,11 @@ const vm = require("vm");
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = path.join(__dirname, "public");
 const CWA = "https://www.cwa.gov.tw";
+const AIRTW = "https://airtw.moenv.gov.tw";
 const STATION_ID = "C0E73";
 const TOWN_ID = "1000505";
+const AIR_SITE_ID = "72";
+const UVI_STATIONS = ["46757", "46728"];
 
 const cache = new Map();
 
@@ -125,6 +128,103 @@ function parseWindSpeed(html) {
   };
 }
 
+function taipeiLatestHour() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+  const date = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), 0));
+  if (Number(parts.minute) <= 6) date.setUTCHours(date.getUTCHours() - 1);
+  return `${date.getUTCFullYear()}/${String(date.getUTCMonth() + 1).padStart(2, "0")}/${String(date.getUTCDate()).padStart(2, "0")} ${String(date.getUTCHours()).padStart(2, "0")}:00`;
+}
+
+function asObjectList(list) {
+  return Object.assign({}, ...list.map((item) => item || {}));
+}
+
+async function fetchAirQuality() {
+  const queryTime = taipeiLatestHour();
+  const params = new URLSearchParams({
+    Type: "GetAQInfo",
+    Layer: "EPA",
+    QueryTime: queryTime,
+    Language: "TW",
+  });
+  const mapText = await fetchText(`${AIRTW}/gis_ajax.aspx?${params}`, 10 * 60 * 1000);
+  const sites = JSON.parse(mapText);
+  const site = sites.find((item) => item.SiteID === AIR_SITE_ID) || {};
+
+  const detailParams = new URLSearchParams({
+    Target: "air_list",
+    SiteID: AIR_SITE_ID,
+    Datatime: queryTime,
+    Type: "",
+  });
+  const detailText = await fetchText(`${AIRTW}/ajax.aspx?${detailParams}`, 10 * 60 * 1000);
+  const detail = detailText.trim().startsWith("[") ? asObjectList(JSON.parse(detailText)) : {};
+
+  return {
+    station: detail.sitename || "頭份",
+    time: detail.date || queryTime,
+    aqi: site.AQI || detail.AQI || "-",
+    condition: site.AQI && site.AQI !== "-1" ? aqiLevel(site.AQI) : "有效數據不足",
+    pollutant: site.POLLUTANT || detail.POLLUTANT || "",
+    pm25: detail.PM25_FIX || "-",
+    pm25Avg: detail.AVPM25 || "-",
+    pm10: detail.PM10_FIX || "-",
+    o3: detail.O3_FIX || "-",
+    sourceUpdated: queryTime,
+  };
+}
+
+function aqiLevel(value) {
+  const aqi = toNumber(value);
+  if (aqi === null || aqi < 0) return "有效數據不足";
+  if (aqi <= 50) return "良好";
+  if (aqi <= 100) return "普通";
+  if (aqi <= 150) return "對敏感族群不健康";
+  if (aqi <= 200) return "對所有族群不健康";
+  if (aqi <= 300) return "非常不健康";
+  return "危害";
+}
+
+function parseUvi(script) {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(script, sandbox, { timeout: 1000 });
+
+  const timeline = sandbox.Timeline || [];
+  const stations = {};
+  for (const id of UVI_STATIONS) {
+    const info = sandbox.Info_UVI_Stations?.[id] || {};
+    const values = (sandbox.UVI?.[id] || []).map((point, i) => ({
+      hour: timeline[i] || "",
+      value: point?.y ?? null,
+      color: point?.color || "",
+    }));
+    const numericValues = values.filter((item) => Number.isFinite(Number(item.value)));
+    const latest = [...numericValues].reverse().find((item) => item.value !== null) || null;
+    const max = numericValues.reduce((best, item) => (item.value > best.value ? item : best), numericValues[0] || { value: "-", hour: "-" });
+    stations[id] = {
+      id,
+      name: info.Name?.C || id,
+      latest,
+      max,
+      status: info.uvi_status,
+    };
+  }
+  return {
+    timeFrom: sandbox.Time_From || "",
+    timeTo: sandbox.Time_To || "",
+    stations,
+  };
+}
+
 function parseStationRows(html) {
   return [...html.matchAll(/<tr\b([^>]*)>([\s\S]*?)<\/tr>/gi)].map((match) => {
     const attrs = match[1];
@@ -232,11 +332,13 @@ function parseForecast(html) {
 
 async function apiData() {
   const now = Date.now();
-  const [stationHtml, plotHtml, forecastHtml, windHtml] = await Promise.all([
+  const [stationHtml, plotHtml, forecastHtml, windHtml, uviScript, airQuality] = await Promise.all([
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24hr/${STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24plot/Plot24_${STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Town/MOD/3hr/${TOWN_ID}_3hr_PC.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/WindSpeed/MOD/plot/${STATION_ID}.html?T=${now}`),
+    fetchText(`${CWA}/Data/js/OBS_UVI_chart.js?T=${now}`, 10 * 60 * 1000),
+    fetchAirQuality().catch((error) => ({ error: error.message })),
   ]);
   const observations = parseStationRows(stationHtml);
   const windSpeed = parseWindSpeed(windHtml);
@@ -254,12 +356,16 @@ async function apiData() {
       station: `${CWA}/V8/C/W/OBS_Station.html?ID=${STATION_ID}`,
       forecast: `${CWA}/V8/C/W/Town/Town.html?TID=${TOWN_ID}`,
       windSpeed: `${CWA}/V8/C/W/WindSpeed/WindSpeed_All.html?CID=10005&StationID=${STATION_ID}`,
+      airQuality: `${AIRTW}/CHT/EnvMonitoring/Central/CentralMonitoring.aspx`,
+      uvi: `${CWA}/V8/C/W/OBS_UVI.html`,
     },
     updatedAt: new Date().toISOString(),
     current,
     observationSummary: summary,
     observations,
     windSpeed,
+    airQuality,
+    uvi: parseUvi(uviScript),
     plot24: parsePlotScript(plotHtml),
     forecast72: parseForecast(forecastHtml),
   };
