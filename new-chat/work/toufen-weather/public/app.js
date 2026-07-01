@@ -73,6 +73,14 @@ function uviClass(value) {
   return "uvi-green";
 }
 
+function reservoirClass(value) {
+  const n = numeric(value);
+  if (n === null) return "";
+  if (n >= 70) return "water-high";
+  if (n >= 30) return "water-mid";
+  return "water-low";
+}
+
 function badge(value, className, suffix = "") {
   const text = `${value || "--"}${value && value !== "-" ? suffix : ""}`;
   return `<span class="metric ${className}">${text}</span>`;
@@ -158,7 +166,13 @@ function render(data) {
   setText("lastUpdated", `頁面更新 ${fmtTime(data.updatedAt)}`);
 
   const air = data.airQuality || {};
-  setText("envUpdated", air.time ? `空品 ${air.time} / UVI ${data.uvi?.timeTo || "--"}` : `UVI ${data.uvi?.timeTo || "--"}`);
+  const reservoir = data.reservoir || {};
+  const envTimes = [
+    air.time ? `空品 ${air.time}` : "",
+    data.uvi?.timeTo ? `UVI ${data.uvi.timeTo}` : "",
+    reservoir.time ? `水庫 ${reservoir.time.replace("T", " ").slice(0, 16)}` : "",
+  ].filter(Boolean);
+  setText("envUpdated", envTimes.join(" / ") || "--");
   setText("aqi", air.aqi || "--");
   $("aqi").className = aqiClass(air.aqi);
   setText("aqiCondition", air.condition || "--");
@@ -175,6 +189,9 @@ function render(data) {
   setText("uviHoulong", houlong?.latest?.value ?? "--");
   $("uviHoulong").className = uviClass(houlong?.latest?.value);
   setText("uviHoulongMax", `今日最大 ${houlong?.max?.value ?? "--"} (${houlong?.max?.hour || "--"}時)`);
+  setText("reservoirStorage", reservoir.percentage !== undefined ? `${reservoir.percentage}%` : "--");
+  $("reservoirStorage").className = reservoirClass(reservoir.percentage);
+  setText("reservoirTime", reservoir.time ? `水情時間 ${reservoir.time.replace("T", " ").slice(0, 16)}` : "--");
 
   setText("maxTemp", `${summary.maxTemp?.value ?? "--"}°C`);
   $("maxTemp").className = tempClass(summary.maxTemp?.value);

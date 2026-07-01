@@ -7,9 +7,12 @@ const PORT = Number(process.env.PORT || 4173);
 const ROOT = path.join(__dirname, "public");
 const CWA = "https://www.cwa.gov.tw";
 const AIRTW = "https://airtw.moenv.gov.tw";
+const WRA = "https://fhy.wra.gov.tw";
+const WRA_API_KEY = "d6dd3cd4-493f-43a3-92b1-8b2db217da96";
 const STATION_ID = "C0E73";
 const TOWN_ID = "1000505";
 const AIR_SITE_ID = "72";
+const RESERVOIR_ID = "10501";
 const UVI_STATIONS = ["46757", "46728"];
 
 const cache = new Map();
@@ -18,7 +21,7 @@ function cacheKey(url) {
   return url.replace(/[?&]T=\d+/, "");
 }
 
-async function fetchText(url, ttlMs = 5 * 60 * 1000) {
+async function fetchText(url, ttlMs = 5 * 60 * 1000, extraHeaders = {}) {
   const key = cacheKey(url);
   const hit = cache.get(key);
   if (hit && Date.now() - hit.time < ttlMs) return hit.text;
@@ -27,12 +30,17 @@ async function fetchText(url, ttlMs = 5 * 60 * 1000) {
     headers: {
       "user-agent": "ToufenWeather/1.0 (+local dashboard)",
       "accept-language": "zh-TW,zh;q=0.9",
+      ...extraHeaders,
     },
   });
   if (!res.ok) throw new Error(`CWA fetch failed ${res.status}: ${url}`);
   const text = await res.text();
   cache.set(key, { time: Date.now(), text });
   return text;
+}
+
+async function fetchJson(url, ttlMs = 5 * 60 * 1000, extraHeaders = {}) {
+  return JSON.parse(await fetchText(url, ttlMs, extraHeaders));
 }
 
 function stripTags(html) {
@@ -179,6 +187,27 @@ async function fetchAirQuality() {
     pm10: detail.PM10_FIX || "-",
     o3: detail.O3_FIX || "-",
     sourceUpdated: queryTime,
+  };
+}
+
+async function fetchReservoir() {
+  const headers = { apikey: WRA_API_KEY };
+  const [stations, realtime] = await Promise.all([
+    fetchJson(`${WRA}/Api/v2/Reservoir/Station`, 30 * 60 * 1000, headers),
+    fetchJson(`${WRA}/Api/v2/Reservoir/Info/RealTime`, 10 * 60 * 1000, headers),
+  ]);
+  const station = stations.Data?.find((item) => item.StationNo === RESERVOIR_ID) || {};
+  const info = realtime.Data?.find((item) => item.StationNo === RESERVOIR_ID) || {};
+  const percent = toNumber(info.PercentageOfStorage);
+
+  return {
+    station: station.StationName || "永和山水庫",
+    time: info.Time || "",
+    percentage: percent === null ? "-" : Math.round(percent * 10) / 10,
+    waterHeight: info.WaterHeight ?? "-",
+    effectiveStorage: info.EffectiveStorage ?? "-",
+    effectiveCapacity: info.EffectiveCapacity ?? station.EffectiveCapacity ?? "-",
+    sourceUpdated: realtime.UpdataTime || "",
   };
 }
 
@@ -332,13 +361,14 @@ function parseForecast(html) {
 
 async function apiData() {
   const now = Date.now();
-  const [stationHtml, plotHtml, forecastHtml, windHtml, uviScript, airQuality] = await Promise.all([
+  const [stationHtml, plotHtml, forecastHtml, windHtml, uviScript, airQuality, reservoir] = await Promise.all([
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24hr/${STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24plot/Plot24_${STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Town/MOD/3hr/${TOWN_ID}_3hr_PC.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/WindSpeed/MOD/plot/${STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/Data/js/OBS_UVI_chart.js?T=${now}`, 10 * 60 * 1000),
     fetchAirQuality().catch((error) => ({ error: error.message })),
+    fetchReservoir().catch((error) => ({ error: error.message })),
   ]);
   const observations = parseStationRows(stationHtml);
   const windSpeed = parseWindSpeed(windHtml);
@@ -358,6 +388,7 @@ async function apiData() {
       windSpeed: `${CWA}/V8/C/W/WindSpeed/WindSpeed_All.html?CID=10005&StationID=${STATION_ID}`,
       airQuality: `${AIRTW}/CHT/EnvMonitoring/Central/CentralMonitoring.aspx`,
       uvi: `${CWA}/V8/C/W/OBS_UVI.html`,
+      reservoir: `${WRA}/fhyv2/monitor/reservoir`,
     },
     updatedAt: new Date().toISOString(),
     current,
@@ -365,6 +396,7 @@ async function apiData() {
     observations,
     windSpeed,
     airQuality,
+    reservoir,
     uvi: parseUvi(uviScript),
     plot24: parsePlotScript(plotHtml),
     forecast72: parseForecast(forecastHtml),
