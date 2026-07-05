@@ -1,4 +1,6 @@
 const $ = (id) => document.getElementById(id);
+const AUTO_REFRESH_MS = 10 * 60 * 1000;
+let isLoading = false;
 
 function fmtTime(iso) {
   return new Intl.DateTimeFormat("zh-TW", {
@@ -225,6 +227,8 @@ function render(data) {
 }
 
 async function load() {
+  if (isLoading) return;
+  isLoading = true;
   $("refresh").disabled = true;
   try {
     const apiBase = window.location.protocol === "file:" ? "http://localhost:4174/api/weather" : "/api/weather";
@@ -236,8 +240,10 @@ async function load() {
     setText("obsTime", hint);
   } finally {
     $("refresh").disabled = false;
+    isLoading = false;
   }
 }
 
 $("refresh").addEventListener("click", load);
 load();
+setInterval(load, AUTO_REFRESH_MS);
