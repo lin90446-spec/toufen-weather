@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: toufen-weather
-    runtime: node
-    plan: free
-    buildCommand: npm install
-    startCommand: npm start
-    healthCheckPath: /
