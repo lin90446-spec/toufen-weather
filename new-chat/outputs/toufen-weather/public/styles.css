@@ -40,6 +40,7 @@ footer {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .kicker,
@@ -83,6 +84,25 @@ button {
   color: var(--blue);
   font-size: 1.45rem;
   cursor: pointer;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--blue);
+  font-weight: 700;
 }
 
 .current-grid {
@@ -297,6 +317,101 @@ small {
   margin-top: 18px;
 }
 
+.typhoon-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.typhoon-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 18px;
+}
+
+.typhoon-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.typhoon-title h2 {
+  margin-top: 4px;
+  font-size: 1.55rem;
+}
+
+.typhoon-title strong {
+  text-align: right;
+}
+
+.storm-inside {
+  color: #c91f1f;
+  font-weight: 800;
+}
+
+.typhoon-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.typhoon-grid section {
+  min-height: 108px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcf7;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.typhoon-grid strong {
+  font-size: 1.25rem;
+}
+
+.typhoon-note {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.typhoon-map {
+  margin-top: 16px;
+}
+
+.line-typhoon {
+  fill: none;
+  stroke: var(--red);
+  stroke-width: 3;
+}
+
+.typhoon-dot {
+  fill: #fff;
+  stroke: var(--red);
+  stroke-width: 2;
+}
+
+.typhoon-dot.home {
+  fill: var(--blue);
+  stroke: var(--blue);
+}
+
+.typhoon-dot.current {
+  fill: var(--red);
+}
+
+.empty-state {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+}
+
 svg {
   width: 100%;
   height: auto;
@@ -419,7 +534,8 @@ a:hover {
   .current-grid,
   .summary-grid,
   .environment-grid,
-  .charts {
+  .charts,
+  .typhoon-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -437,13 +553,21 @@ a:hover {
 
   .topbar,
   .panel-head {
+    flex-direction: column;
     align-items: flex-start;
+  }
+
+  .top-actions,
+  .typhoon-title {
+    width: 100%;
+    align-items: stretch;
   }
 
   .current-grid,
   .summary-grid,
   .environment-grid,
-  .charts {
+  .charts,
+  .typhoon-grid {
     grid-template-columns: 1fr;
   }
 

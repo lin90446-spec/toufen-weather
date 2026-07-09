@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>頭份颱風資訊</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="kicker">中央氣象署颱風消息 / 參考點 24.7N, 120.9E</p>
+        <h1>頭份颱風資訊</h1>
+      </div>
+      <div class="top-actions">
+        <a class="nav-button" href="index.html">頭份天氣</a>
+        <button id="refreshTyphoon" type="button" title="重新整理">↻</button>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>目前颱風</h2>
+        <p id="typhoonUpdated">讀取中</p>
+      </div>
+      <div id="typhoonContent" class="typhoon-list">
+        <p class="empty-state">讀取中</p>
+      </div>
+    </section>
+
+    <footer>
+      <span id="typhoonLastUpdated">--</span>
+      <a href="https://www.cwa.gov.tw/V8/C/P/Typhoon/TY_NEWS.html" target="_blank" rel="noreferrer">中央氣象署颱風消息</a>
+      <a href="index.html">回頭份天氣資訊</a>
+    </footer>
+  </main>
+  <script src="typhoon.js"></script>
+</body>
+</html>

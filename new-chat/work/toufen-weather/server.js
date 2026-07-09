@@ -14,6 +14,8 @@ const TOWN_ID = "1000505";
 const AIR_SITE_ID = "72";
 const RESERVOIR_ID = "10501";
 const UVI_STATIONS = ["46757", "46728"];
+const TOUFEN_COORD = { lat: 24.7, lon: 120.9 };
+const TYPHOON_TARGET_HOURS = new Set([6, 12, 18, 24, 36, 48]);
 
 const cache = new Map();
 
@@ -61,6 +63,45 @@ function pick(regex, text, fallback = "-") {
 function toNumber(value) {
   const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toRad(value) {
+  return value * Math.PI / 180;
+}
+
+function distanceKm(from, to) {
+  const earthRadiusKm = 6371;
+  const dLat = toRad(to.lat - from.lat);
+  const dLon = toRad(to.lon - from.lon);
+  const lat1 = toRad(from.lat);
+  const lat2 = toRad(to.lat);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function bearingDegrees(from, to) {
+  const lat1 = toRad(from.lat);
+  const lat2 = toRad(to.lat);
+  const dLon = toRad(to.lon - from.lon);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function compassLabel(degrees) {
+  const labels = ["北", "北北東", "東北", "東北東", "東", "東南東", "東南", "南南東", "南", "南南西", "西南", "西南西", "西", "西北西", "西北", "北北西"];
+  return labels[Math.round(degrees / 22.5) % labels.length];
+}
+
+function relationFromToufen(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const target = { lat, lon };
+  const bearing = bearingDegrees(TOUFEN_COORD, target);
+  return {
+    distanceKm: Math.round(distanceKm(TOUFEN_COORD, target)),
+    bearing: Math.round(bearing),
+    direction: compassLabel(bearing),
+  };
 }
 
 function extreme(rows, field, mode) {
@@ -359,6 +400,225 @@ function parseForecast(html) {
   }));
 }
 
+function listItems(html) {
+  return [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)].map((m) => stripTags(m[1]));
+}
+
+function parsePosition(text) {
+  const match = text.match(/北緯\s*([\d.]+)\s*度，東經\s*([\d.]+)\s*度/);
+  if (!match) return { lat: null, lon: null };
+  return { lat: Number(match[1]), lon: Number(match[2]) };
+}
+
+function parseRadius(text, level) {
+  const match = text.match(new RegExp(`${level}級風(?:平均)?暴風半徑\\s*([\\d.]+)\\s*公里`));
+  if (!match) return null;
+  const start = match.index || 0;
+  const next = text.slice(start + 1).search(/[七十]級風(?:平均)?暴風半徑/);
+  const segment = next >= 0 ? text.slice(start, start + 1 + next) : text.slice(start);
+  const quadrants = {};
+  for (const q of ["西北", "東北", "西南", "東南"]) {
+    const qMatch = segment.match(new RegExp(`${q}側\\s*([\\d.]+)\\s*公里`));
+    if (qMatch) quadrants[q] = Number(qMatch[1]);
+  }
+  return {
+    averageKm: Number(match[1]),
+    quadrants,
+  };
+}
+
+function parseTyphoonMetrics(items) {
+  const joined = items.join(" ");
+  const position = parsePosition(joined);
+  const pressure = joined.match(/中心氣壓[：:]?\s*([\d.]+)\s*百帕/);
+  const maxWind = joined.match(/近中心最大風速[：:]?\s*(?:近中心最大風速)?每秒\s*([\d.]+)\s*公尺/);
+  const gust = joined.match(/瞬間(?:之)?最大陣風[：:]?\s*(?:瞬間最大陣風)?每秒\s*([\d.]+)\s*公尺/);
+  return {
+    lat: position.lat,
+    lon: position.lon,
+    pressure: pressure ? Number(pressure[1]) : null,
+    maxWind: maxWind ? Number(maxWind[1]) : null,
+    gust: gust ? Number(gust[1]) : null,
+    radius7: parseRadius(joined, "七"),
+    radius10: parseRadius(joined, "十"),
+    relation: relationFromToufen(position.lat, position.lon),
+  };
+}
+
+function parseWarningCurrent(body) {
+  const items = listItems(body);
+  const metrics = parseTyphoonMetrics(items);
+  const positionText = items.find((item) => item.startsWith("中心位置")) || "";
+  const movementText = items.find((item) => item.startsWith("前進方向")) || "";
+  const movement = movementText.match(/每小時\s*([\d.]+)\s*公里速度，向(.+?)進行/);
+  return {
+    time: positionText.match(/(\d+日\d+時)/)?.[1] || "",
+    movementDirection: movement ? movement[2] : "",
+    movementSpeedKmh: movement ? Number(movement[1]) : null,
+    ...metrics,
+  };
+}
+
+function parseWarningForecasts(html, year) {
+  const forecasts = [];
+  for (const match of html.matchAll(/<a[^>]*>(預測[\s\S]*?小時[\s\S]*?)<\/a>[\s\S]*?<div class="panel-body">\s*<p>([\s\S]*?)<\/p>/gi)) {
+    const period = stripTags(match[1]);
+    const hourMatch = period.match(/(\d+)(?:-(\d+))?\s*小時/);
+    const hour = hourMatch ? Number(hourMatch[2] || hourMatch[1]) : null;
+    if (!TYPHOON_TARGET_HOURS.has(hour)) continue;
+    const text = stripTags(match[2]);
+    const movement = text.match(/^(\S+)\s+時速\s*([\d.]+)\s*公里/);
+    const timeText = text.match(/預測\s*(\d{2}月\d{2}日\d{2}時)/)?.[1] || "";
+    const probability = text.match(/70%機率半徑\s*([\d.]+)\s*公里/);
+    forecasts.push({
+      hour,
+      period,
+      time: timeText ? `${year}年${timeText}` : "",
+      movementDirection: movement ? movement[1] : "",
+      movementSpeedKmh: movement ? Number(movement[2]) : null,
+      probability70Km: probability ? Number(probability[1]) : null,
+      ...parseTyphoonMetrics([text]),
+    });
+  }
+  return forecasts;
+}
+
+function parseTyphoonWarningScript(script) {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(script, sandbox, { timeout: 1000 });
+  if (!sandbox.TY_WARN_LIST?.C?.length || sandbox.TY_WARN_Lv?.ID === "END") return null;
+
+  const year = String(sandbox.File_Time || "").slice(0, 4) || new Date().getFullYear().toString();
+  const forecasts = parseWarningForecasts(sandbox.TED_PTA?.C || "", year);
+  const typhoons = sandbox.TY_WARN_LIST.C.map((item) => {
+    const body = item.TabBody || "";
+    const title = stripTags(body.match(/<h3>([\s\S]*?)<\/h3>/i)?.[1] || item.TabName || "");
+    const issuedTime = stripTags(body.match(/<p>發布時間：([\s\S]*?)<\/p>/i)?.[1] || "");
+    const report = stripTags(body.match(/<span class="gray-bar">([\s\S]*?)<\/span>/i)?.[1] || "");
+    const name = title.match(/(?:熱帶性低氣壓|輕度颱風|中度颱風|強烈颱風)\s*([^（\s]+)/)?.[1] || item.TabName?.replace(/^(熱帶性低氣壓|輕度颱風|中度颱風|強烈颱風)\s*/, "") || "";
+    return {
+      id: sandbox.PTA_TYPHOON || item.ID || "",
+      nameZh: name,
+      nameEn: title.match(/國際命名\s*([A-Z0-9-]+)/)?.[1] || sandbox.PTA_TYPHOON || "",
+      intensity: title.match(/(熱帶性低氣壓|輕度颱風|中度颱風|強烈颱風)/)?.[1] || "",
+      number: report.match(/編號第\s*([^\s號]+)\s*號/)?.[1] || "",
+      report,
+      issuedTime,
+      current: parseWarningCurrent(body),
+      forecasts,
+    };
+  }).filter((item) => item.current.lat !== null);
+
+  return {
+    source: `${CWA}/V8/C/P/Typhoon/TY_WARN.html`,
+    dataSource: "颱風警報單",
+    updatedAt: new Date().toISOString(),
+    cwaUpdatedAt: (script.match(/\/\/ Update:\s*([^\n]+)/)?.[1] || "").trim(),
+    dataTime: sandbox.File_Time || "",
+    displayTime: typhoons[0]?.issuedTime ? `發布時間 ${typhoons[0].issuedTime}` : "",
+    warningLevel: sandbox.TY_WARN_Lv?.C || "",
+    warningArea: sandbox.WarningArea || {},
+    movement: sandbox.Movement || "",
+    nextIssueTime: sandbox.NoteText?.find((item) => item.includes("下次警報")) || "",
+    count: {
+      tropicalDepression: 0,
+      typhoon: typhoons.length,
+    },
+    referencePoint: {
+      name: "頭份",
+      ...TOUFEN_COORD,
+    },
+    typhoons,
+  };
+}
+
+function parseTyphoonPanel(panel, typhoonNames, year) {
+  const heading = stripTags(panel.match(/<div class="panel-heading">([\s\S]*?)<\/div>\s*<div/i)?.[1] || "");
+  const id = Object.keys(typhoonNames).find((key) => heading.includes(key) || heading.includes(typhoonNames[key]?.Name?.C || "")) || "";
+  const name = typhoonNames[id]?.Name || {};
+  const intensity = heading.match(/(熱帶性低氣壓|輕度颱風|中度颱風|強烈颱風)/)?.[1] || "";
+  const number = heading.match(/編號第\s*([^\s]+)\s*號/)?.[1] || "";
+  const now = panel.match(/<span class="now">[\s\S]*?<\/span>\s*<p>([\s\S]*?)<\/p>\s*<ul[^>]*>([\s\S]*?)<\/ul>/i);
+  const currentItems = now ? listItems(now[2]) : [];
+  const current = {
+    time: now ? stripTags(now[1]) : "",
+    movementDirection: currentItems.find((item) => item.startsWith("過去移動方向"))?.replace("過去移動方向", "").trim() || "",
+    movementSpeedKmh: toNumber(currentItems.find((item) => item.startsWith("過去移動時速"))),
+    ...parseTyphoonMetrics(currentItems),
+  };
+
+  const forecasts = [];
+  for (const match of panel.matchAll(/<p>(預測[\s\S]*?小時[\s\S]*?)<\/p>\s*<ul[^>]*>([\s\S]*?)<\/ul>/gi)) {
+    const period = stripTags(match[1]);
+    const hourMatch = period.match(/(\d+)(?:-(\d+))?\s*小時/);
+    const hour = hourMatch ? Number(hourMatch[2] || hourMatch[1]) : null;
+    if (!TYPHOON_TARGET_HOURS.has(hour)) continue;
+    const items = listItems(match[2]);
+    const timeText = items.find((item) => item.startsWith("預測 "))?.replace("預測 ", "").trim() || "";
+    const movement = items[0]?.match(/^(\S+)\s+時速\s*([\d.]+)\s*公里/) || null;
+    const probability = items.find((item) => item.includes("70%機率半徑"))?.match(/70%機率半徑\s*([\d.]+)\s*公里/);
+    forecasts.push({
+      hour,
+      period,
+      time: timeText ? `${year}年${timeText}` : "",
+      movementDirection: movement ? movement[1] : "",
+      movementSpeedKmh: movement ? Number(movement[2]) : null,
+      probability70Km: probability ? Number(probability[1]) : null,
+      ...parseTyphoonMetrics(items),
+    });
+  }
+
+  return {
+    id,
+    nameZh: name.C || "",
+    nameEn: name.E || id,
+    intensity,
+    number,
+    current,
+    forecasts,
+  };
+}
+
+function parseTyphoonScript(script) {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(script, sandbox, { timeout: 1000 });
+  const year = String(sandbox.TY_DataTime || "").slice(0, 4) || new Date().getFullYear().toString();
+  const html = sandbox.TY_LIST_2?.C || "";
+  const panels = html.split('<div class="panel panel-default">').slice(1).map((part) => `<div class="panel panel-default">${part}`);
+  return {
+    source: `${CWA}/V8/C/P/Typhoon/TY_NEWS.html`,
+    updatedAt: new Date().toISOString(),
+    cwaUpdatedAt: (script.match(/\/\/ Update:\s*([^\n]+)/)?.[1] || "").trim(),
+    dataTime: sandbox.TY_DataTime || "",
+    displayTime: sandbox.TY_TIME?.C || "",
+    count: {
+      tropicalDepression: sandbox.TY_COUNT?.[0] || 0,
+      typhoon: sandbox.TY_COUNT?.[1] || 0,
+    },
+    referencePoint: {
+      name: "頭份",
+      ...TOUFEN_COORD,
+    },
+    typhoons: panels.map((panel) => parseTyphoonPanel(panel, sandbox.TYPHOON || {}, year)).filter((item) => item.current.lat !== null),
+  };
+}
+
+async function typhoonData() {
+  const now = Date.now();
+  const [warningScript, newsScript] = await Promise.all([
+    fetchText(`${CWA}/Data/js/typhoon/TY_WARN-Data.js?T=${now}`, 10 * 60 * 1000).catch(() => ""),
+    fetchText(`${CWA}/Data/js/typhoon/TY_NEWS-Data.js?T=${now}`, 10 * 60 * 1000),
+  ]);
+  const warning = warningScript ? parseTyphoonWarningScript(warningScript) : null;
+  if (warning?.typhoons?.length) return warning;
+  return {
+    dataSource: "颱風消息",
+    ...parseTyphoonScript(newsScript),
+  };
+}
+
 async function apiData() {
   const now = Date.now();
   const [stationHtml, plotHtml, forecastHtml, windHtml, uviScript, airQuality, reservoir] = await Promise.all([
@@ -431,6 +691,7 @@ http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     if (url.pathname === "/api/weather") return sendJson(res, await apiData());
+    if (url.pathname === "/api/typhoon") return sendJson(res, await typhoonData());
 
     const safePath = path.normalize(url.pathname === "/" ? "/index.html" : url.pathname).replace(/^(\.\.[/\\])+/, "");
     const filePath = path.join(ROOT, safePath);
