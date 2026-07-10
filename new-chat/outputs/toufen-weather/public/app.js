@@ -92,6 +92,10 @@ function obsTimeLabel(value) {
   return value && value !== "-" ? `觀測時間 ${value}` : "--";
 }
 
+function chartTimeLabel(point) {
+  return point.displayTime || fmtTime(point.time);
+}
+
 function drawLine(svg, points, key, unit, className, color) {
   const valid = points.filter((p) => Number.isFinite(Number(p[key])));
   if (!valid.length) {
@@ -117,7 +121,7 @@ function drawLine(svg, points, key, unit, className, color) {
     <line class="axis" x1="${pad.left}" x2="${width - pad.right}" y1="${height - pad.bottom}" y2="${height - pad.bottom}"></line>
     <path class="${className}" d="${d}"></path>
     ${valid.map((p, i) => `<circle class="dot" cx="${x(i)}" cy="${y(Number(p[key]))}" r="3" stroke="${color}"></circle>`).join("")}
-    ${labels.map((p, i) => `<text class="chart-text" x="${[pad.left, width / 2 - 34, width - pad.right - 64][i]}" y="${height - 12}">${fmtTime(p.time)}</text>`).join("")}
+    ${labels.map((p, i) => `<text class="chart-text" x="${[pad.left, width / 2 - 34, width - pad.right - 64][i]}" y="${height - 12}">${chartTimeLabel(p)}</text>`).join("")}
   `;
 }
 
@@ -224,6 +228,7 @@ function render(data) {
   drawLine($("tempChart"), points, "temp", "°C", "line-temp", "#d47a1f");
   drawLine($("humidityChart"), points, "humidity", "%", "line-humidity", "#256d85");
   drawBars($("rainChart"), points);
+  drawLine($("pressureChart"), pressure.points || [], "pressure", "hPa", "line-pressure", "#6f3aa8");
 
   $("forecastBody").innerHTML = (data.forecast72 || []).map((f) => `
     <tr class="${f.is24hr ? "within24" : ""}">

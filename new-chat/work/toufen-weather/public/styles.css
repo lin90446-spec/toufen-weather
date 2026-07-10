@@ -443,6 +443,12 @@ svg {
   stroke-width: 3;
 }
 
+.line-pressure {
+  fill: none;
+  stroke: var(--purple);
+  stroke-width: 3;
+}
+
 .bar-rain {
   fill: #b7c3c8;
 }

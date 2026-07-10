@@ -137,6 +137,11 @@ function pressureSummary(rows) {
     },
     maxPressure: extreme(rows, "pressure", "max"),
     minPressure: extreme(rows, "pressure", "min"),
+    points: [...rows].reverse().map((row) => ({
+      time: row.time,
+      displayTime: row.time,
+      pressure: toNumber(row.pressure),
+    })).filter((row) => row.pressure !== null),
   };
 }
 
