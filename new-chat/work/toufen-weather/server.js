@@ -10,6 +10,7 @@ const AIRTW = "https://airtw.moenv.gov.tw";
 const WRA = "https://fhy.wra.gov.tw";
 const WRA_API_KEY = "d6dd3cd4-493f-43a3-92b1-8b2db217da96";
 const STATION_ID = "C0E73";
+const PRESSURE_STATION_ID = "46757";
 const TOWN_ID = "1000505";
 const AIR_SITE_ID = "72";
 const RESERVOIR_ID = "10501";
@@ -122,6 +123,20 @@ function observationSummary(rows) {
     minTemp: extreme(rows, "temp", "min"),
     maxWind: extreme(rows, "windSpeed", "max"),
     maxGust: extreme(rows, "gust", "max"),
+  };
+}
+
+function pressureSummary(rows) {
+  const current = rows[0] || {};
+  return {
+    stationId: PRESSURE_STATION_ID,
+    stationName: current.stationName || "新竹",
+    current: {
+      value: current.pressure || "-",
+      time: current.time || "-",
+    },
+    maxPressure: extreme(rows, "pressure", "max"),
+    minPressure: extreme(rows, "pressure", "min"),
   };
 }
 
@@ -313,6 +328,7 @@ function parseStationRows(html) {
       windSpeed: pick(/<span class="wind_2[^"]*">([\s\S]*?)<\/span>/i, byHeader["w-2"] || ""),
       gust: pick(/<span class="wind_2[^"]*">([\s\S]*?)<\/span>/i, byHeader["w-3"] || ""),
       humidity: stripTags(byHeader.hum || ""),
+      pressure: stripTags(byHeader.pre || ""),
       rain: stripTags(byHeader.rain || ""),
       stationName: pick(/data-cstname="([^"]+)"/i, attrs, "頭份"),
       countyId: pick(/data-countyid="([^"]+)"/i, attrs, "10005"),
@@ -329,16 +345,19 @@ function parsePlotScript(html) {
 
   const data = sandbox.Plot_Station_Data || {};
   const times = (data.Time || []).map((ms) => new Date(ms).toISOString());
+  const points = times.map((time, i) => ({
+    time,
+    temp: data.Temp_Data?.[i]?.C ?? null,
+    humidity: data.Humi_Data?.[i] ?? null,
+    rain: data.Rain_Data_tmp?.[i]?.[1] ?? null,
+  }));
+  const rain24Total = points.reduce((total, point) => total + (Number(point.rain) || 0), 0);
   return {
     stationId: sandbox.StationID || STATION_ID,
     stationName: sandbox.ST_Name?.C || "頭份",
     timeRange: sandbox.TimeRange || "",
-    points: times.map((time, i) => ({
-      time,
-      temp: data.Temp_Data?.[i]?.C ?? null,
-      humidity: data.Humi_Data?.[i] ?? null,
-      rain: data.Rain_Data_tmp?.[i]?.[1] ?? null,
-    })),
+    rain24Total: Math.round(rain24Total * 10) / 10,
+    points,
   };
 }
 
@@ -621,8 +640,9 @@ async function typhoonData() {
 
 async function apiData() {
   const now = Date.now();
-  const [stationHtml, plotHtml, forecastHtml, windHtml, uviScript, airQuality, reservoir] = await Promise.all([
+  const [stationHtml, pressureHtml, plotHtml, forecastHtml, windHtml, uviScript, airQuality, reservoir] = await Promise.all([
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24hr/${STATION_ID}.html?T=${now}`),
+    fetchText(`${CWA}/V8/C/W/Observe/MOD/24hr/${PRESSURE_STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24plot/Plot24_${STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Town/MOD/3hr/${TOWN_ID}_3hr_PC.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/WindSpeed/MOD/plot/${STATION_ID}.html?T=${now}`),
@@ -631,19 +651,27 @@ async function apiData() {
     fetchReservoir().catch((error) => ({ error: error.message })),
   ]);
   const observations = parseStationRows(stationHtml);
+  const pressureRows = parseStationRows(pressureHtml);
   const windSpeed = parseWindSpeed(windHtml);
   const current = observations[0] || null;
   if (current && windSpeed.latest) {
     current.windDirection = windSpeed.latest.windDirection || current.windDirection;
+    current.windDirectionTime = windSpeed.latest.slotTime || current.time;
     current.windSpeed = windSpeed.latest.windSpeed ?? current.windSpeed;
+    current.windTime = windSpeed.latest.windTime || current.time;
     current.gust = windSpeed.latest.gust ?? current.gust;
+    current.gustTime = windSpeed.latest.gustTime || current.time;
   }
+  if (current) current.humidityTime = current.time;
   const summary = observationSummary(observations);
   summary.maxWind = windSpeed.maxWind;
   summary.maxGust = windSpeed.maxGust;
+  const plot24 = parsePlotScript(plotHtml);
+  if (current) current.rain24 = plot24.rain24Total;
   return {
     source: {
       station: `${CWA}/V8/C/W/OBS_Station.html?ID=${STATION_ID}`,
+      pressure: `${CWA}/V8/C/W/OBS_Station.html?ID=${PRESSURE_STATION_ID}`,
       forecast: `${CWA}/V8/C/W/Town/Town.html?TID=${TOWN_ID}`,
       windSpeed: `${CWA}/V8/C/W/WindSpeed/WindSpeed_All.html?CID=10005&StationID=${STATION_ID}`,
       airQuality: `${AIRTW}/CHT/EnvMonitoring/Central/CentralMonitoring.aspx`,
@@ -653,12 +681,13 @@ async function apiData() {
     updatedAt: new Date().toISOString(),
     current,
     observationSummary: summary,
+    pressure: pressureSummary(pressureRows),
     observations,
     windSpeed,
     airQuality,
     reservoir,
     uvi: parseUvi(uviScript),
-    plot24: parsePlotScript(plotHtml),
+    plot24,
     forecast72: parseForecast(forecastHtml),
   };
 }

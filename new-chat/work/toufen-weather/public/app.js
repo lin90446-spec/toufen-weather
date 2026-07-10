@@ -88,6 +88,10 @@ function badge(value, className, suffix = "") {
   return `<span class="metric ${className}">${text}</span>`;
 }
 
+function obsTimeLabel(value) {
+  return value && value !== "-" ? `觀測時間 ${value}` : "--";
+}
+
 function drawLine(svg, points, key, unit, className, color) {
   const valid = points.filter((p) => Number.isFinite(Number(p[key])));
   if (!valid.length) {
@@ -152,18 +156,25 @@ function drawBars(svg, points) {
 function render(data) {
   const current = data.current || {};
   const summary = data.observationSummary || {};
+  const pressure = data.pressure || {};
   setText("obsTime", `觀測時間 ${current.time || "--"}`);
   setText("currentTemp", current.temp);
   $("currentTemp").className = tempClass(current.temp);
   setText("currentWeather", current.weather);
   setText("windDirection", current.windDirection);
+  setText("windDirectionTime", obsTimeLabel(current.windDirectionTime || current.time));
   setText("windSpeed", current.windSpeed);
   $("windSpeed").className = windClass(current.windSpeed);
+  setText("windSpeedTime", obsTimeLabel(current.windTime || current.time));
   setText("gust", current.gust);
   $("gust").className = windClass(current.gust);
+  setText("gustTime", obsTimeLabel(current.gustTime || current.time));
   setText("humidity", current.humidity);
-  setText("rain", current.rain);
-  $("rain").className = rainClass(current.rain);
+  setText("humidityTime", obsTimeLabel(current.humidityTime || current.time));
+  setText("rain", current.rain24 ?? data.plot24?.rain24Total ?? "--");
+  $("rain").className = rainClass(current.rain24 ?? data.plot24?.rain24Total);
+  setText("pressure", pressure.current?.value ?? "--");
+  setText("pressureTime", obsTimeLabel(pressure.current?.time));
   setText("timeRange", data.plot24?.timeRange || "--");
   setText("lastUpdated", `頁面更新 ${fmtTime(data.updatedAt)}`);
 
@@ -179,9 +190,6 @@ function render(data) {
   $("aqi").className = aqiClass(air.aqi);
   setText("aqiCondition", air.condition || "--");
   setText("aqiPollutant", air.pollutant ? `指標污染物：${air.pollutant}` : "無主要指標污染物");
-  setText("pm25", air.pm25 || "--");
-  setText("pm10", air.pm10 || "--");
-  setText("o3", air.o3 || "--");
 
   const hsinchu = data.uvi?.stations?.["46757"];
   const houlong = data.uvi?.stations?.["46728"];
@@ -207,6 +215,10 @@ function render(data) {
   setText("maxGust", `${summary.maxGust?.value ?? "--"} m/s`);
   $("maxGust").className = windClass(summary.maxGust?.value);
   setText("maxGustTime", `觀測時間 ${summary.maxGust?.time || "--"}`);
+  setText("maxPressure", `${pressure.maxPressure?.value ?? "--"} hPa`);
+  setText("maxPressureTime", obsTimeLabel(pressure.maxPressure?.time));
+  setText("minPressure", `${pressure.minPressure?.value ?? "--"} hPa`);
+  setText("minPressureTime", obsTimeLabel(pressure.minPressure?.time));
 
   const points = data.plot24?.points || [];
   drawLine($("tempChart"), points, "temp", "°C", "line-temp", "#d47a1f");

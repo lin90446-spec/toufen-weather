@@ -25,11 +25,12 @@
         <div class="temp-line"><span id="currentTemp">--</span><span>°C</span></div>
         <p id="currentWeather" class="weather">--</p>
       </article>
-      <article><span class="label">風向</span><strong id="windDirection">--</strong></article>
-      <article><span class="label">風力</span><strong id="windSpeed">--</strong><small>m/s</small></article>
-      <article><span class="label">陣風</span><strong id="gust">--</strong><small>m/s</small></article>
-      <article><span class="label">相對溼度</span><strong id="humidity">--</strong><small>%</small></article>
-      <article><span class="label">累積雨量</span><strong id="rain">--</strong><small>mm</small></article>
+      <article><span class="label">風向</span><strong id="windDirection">--</strong><small id="windDirectionTime">--</small></article>
+      <article><span class="label">風力</span><strong id="windSpeed">--</strong><small>m/s</small><small id="windSpeedTime">--</small></article>
+      <article><span class="label">陣風</span><strong id="gust">--</strong><small>m/s</small><small id="gustTime">--</small></article>
+      <article><span class="label">相對溼度</span><strong id="humidity">--</strong><small>%</small><small id="humidityTime">--</small></article>
+      <article><span class="label">24 小時雨量</span><strong id="rain">--</strong><small>mm</small></article>
+      <article><span class="label">氣壓（新竹）</span><strong id="pressure">--</strong><small>hPa</small><small id="pressureTime">--</small></article>
     </section>
 
     <section class="summary-grid" aria-label="最近24小時摘要">
@@ -53,6 +54,16 @@
         <strong id="maxGust">--</strong>
         <small id="maxGustTime">--</small>
       </article>
+      <article>
+        <span class="label">24 小時最高氣壓（新竹）</span>
+        <strong id="maxPressure">--</strong>
+        <small id="maxPressureTime">--</small>
+      </article>
+      <article>
+        <span class="label">24 小時最低氣壓（新竹）</span>
+        <strong id="minPressure">--</strong>
+        <small id="minPressureTime">--</small>
+      </article>
     </section>
 
     <section class="panel">
@@ -66,21 +77,6 @@
           <strong id="aqi">--</strong>
           <p id="aqiCondition" class="weather">--</p>
           <small id="aqiPollutant">--</small>
-        </article>
-        <article>
-          <span class="label">PM2.5</span>
-          <strong id="pm25">--</strong>
-          <small>μg/m³</small>
-        </article>
-        <article>
-          <span class="label">PM10</span>
-          <strong id="pm10">--</strong>
-          <small>μg/m³</small>
-        </article>
-        <article>
-          <span class="label">O3</span>
-          <strong id="o3">--</strong>
-          <small>ppb</small>
         </article>
         <article>
           <span class="label">新竹紫外線</span>

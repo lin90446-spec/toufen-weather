@@ -107,21 +107,21 @@ button {
 
 .current-grid {
   display: grid;
-  grid-template-columns: 2fr repeat(5, 1fr);
+  grid-template-columns: 2fr repeat(6, minmax(0, 1fr));
   gap: 10px;
   margin: 28px 0 14px;
 }
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   margin: 0 0 14px;
 }
 
 .environment-grid {
   display: grid;
-  grid-template-columns: 1.4fr repeat(6, minmax(0, 1fr));
+  grid-template-columns: 1.4fr repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: 14px;
 }
