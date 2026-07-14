@@ -46,6 +46,64 @@ async function fetchJson(url, ttlMs = 5 * 60 * 1000, extraHeaders = {}) {
   return JSON.parse(await fetchText(url, ttlMs, extraHeaders));
 }
 
+function runDataScript(script, fields) {
+  const sandbox = {};
+  vm.runInNewContext(script, sandbox, { timeout: 1000 });
+  return Object.fromEntries(fields.map((field) => [field, sandbox[field]]));
+}
+
+function imageItem(baseUrl, entry, title, sourceUrl) {
+  if (!entry?.img) {
+    return {
+      title,
+      time: "-",
+      url: "",
+      sourceUrl,
+    };
+  }
+  return {
+    title,
+    time: entry.text || "-",
+    url: `${baseUrl}${entry.img}`,
+    sourceUrl,
+  };
+}
+
+async function fetchCwaImages() {
+  const now = Date.now();
+  const [radarScript, satScript, rainScript] = await Promise.all([
+    fetchText(`${CWA}/Data/js/obs_img/Observe_radar_rain.js?T=${now}`, 10 * 60 * 1000),
+    fetchText(`${CWA}/Data/js/obs_img/Observe_sat.js?T=${now}`, 10 * 60 * 1000),
+    fetchText(`${CWA}/Data/js/rainfall/RainfallImg_Day.js?T=${now}`, 10 * 60 * 1000),
+  ]);
+
+  const { RadarRainImg } = runDataScript(radarScript, ["RadarRainImg"]);
+  const { SatImg } = runDataScript(satScript, ["SatImg"]);
+  const { RainDay } = runDataScript(rainScript, ["RainDay"]);
+  const rainEntry = RainDay?.Tab0?.Day0?.[0];
+
+  return {
+    radar: imageItem(
+      `${CWA}/Data/radar_rain/`,
+      RadarRainImg?.Area1?.size0?.[0],
+      "最新雷達回波圖（降雨雷達：台中南屯）",
+      `${CWA}/V8/C/W/OBS_Radar_rain.html`,
+    ),
+    satellite: imageItem(
+      `${CWA}/Data/satellite/`,
+      SatImg?.Tab1?.Area1?.size0?.C?.[0],
+      "衛星雲圖（東亞、彩色）",
+      `${CWA}/V8/C/W/OBS_Sat.html`,
+    ),
+    rainDaily: imageItem(
+      `${CWA}/Data/rainfall/`,
+      rainEntry ? { ...rainEntry, img: `${rainEntry.img}.jpg` } : null,
+      "單日累積雨量圖",
+      `${CWA}/V8/C/P/Rainfall/Rainfall_QZJ.html`,
+    ),
+  };
+}
+
 function stripTags(html) {
   return html
     .replace(/<br[^>]*>/gi, " ")
@@ -64,6 +122,12 @@ function pick(regex, text, fallback = "-") {
 function toNumber(value) {
   const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatPlotTime(ms) {
+  const date = new Date(ms);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(date.getUTCMonth() + 1)}/${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
 }
 
 function toRad(value) {
@@ -352,6 +416,7 @@ function parsePlotScript(html) {
   const times = (data.Time || []).map((ms) => new Date(ms).toISOString());
   const points = times.map((time, i) => ({
     time,
+    displayTime: formatPlotTime(data.Time[i]),
     temp: data.Temp_Data?.[i]?.C ?? null,
     humidity: data.Humi_Data?.[i] ?? null,
     rain: data.Rain_Data_tmp?.[i]?.[1] ?? null,
@@ -645,7 +710,7 @@ async function typhoonData() {
 
 async function apiData() {
   const now = Date.now();
-  const [stationHtml, pressureHtml, plotHtml, forecastHtml, windHtml, uviScript, airQuality, reservoir] = await Promise.all([
+  const [stationHtml, pressureHtml, plotHtml, forecastHtml, windHtml, uviScript, airQuality, reservoir, cwaImages] = await Promise.all([
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24hr/${STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24hr/${PRESSURE_STATION_ID}.html?T=${now}`),
     fetchText(`${CWA}/V8/C/W/Observe/MOD/24plot/Plot24_${STATION_ID}.html?T=${now}`),
@@ -654,6 +719,7 @@ async function apiData() {
     fetchText(`${CWA}/Data/js/OBS_UVI_chart.js?T=${now}`, 10 * 60 * 1000),
     fetchAirQuality().catch((error) => ({ error: error.message })),
     fetchReservoir().catch((error) => ({ error: error.message })),
+    fetchCwaImages().catch((error) => ({ error: error.message })),
   ]);
   const observations = parseStationRows(stationHtml);
   const pressureRows = parseStationRows(pressureHtml);
@@ -682,6 +748,9 @@ async function apiData() {
       airQuality: `${AIRTW}/CHT/EnvMonitoring/Central/CentralMonitoring.aspx`,
       uvi: `${CWA}/V8/C/W/OBS_UVI.html`,
       reservoir: `${WRA}/fhyv2/monitor/reservoir`,
+      radar: `${CWA}/V8/C/W/OBS_Radar_rain.html`,
+      satellite: `${CWA}/V8/C/W/OBS_Sat.html`,
+      rainDaily: `${CWA}/V8/C/P/Rainfall/Rainfall_QZJ.html`,
     },
     updatedAt: new Date().toISOString(),
     current,
@@ -691,6 +760,7 @@ async function apiData() {
     windSpeed,
     airQuality,
     reservoir,
+    cwaImages,
     uvi: parseUvi(uviScript),
     plot24,
     forecast72: parseForecast(forecastHtml),

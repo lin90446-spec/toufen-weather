@@ -92,6 +92,18 @@ function obsTimeLabel(value) {
   return value && value !== "-" ? `觀測時間 ${value}` : "--";
 }
 
+function setImage(id, item) {
+  const img = $(`${id}Image`);
+  const link = $(`${id}Link`);
+  const time = $(`${id}Time`);
+  const stamp = item?.url ? `${item.url}${item.url.includes("?") ? "&" : "?"}t=${Date.now()}` : "";
+  img.src = stamp;
+  img.hidden = !item?.url;
+  link.href = item?.sourceUrl || "#";
+  setText(`${id}Time`, item?.time || "--");
+  time.className = item?.url ? "" : "muted";
+}
+
 function chartTimeLabel(point) {
   return point.displayTime || fmtTime(point.time);
 }
@@ -153,7 +165,7 @@ function drawBars(svg, points) {
       const barH = height - pad.bottom - y(value);
       return `<rect class="bar-rain ${rainClass(value)}" x="${x}" y="${y(value)}" width="${barW}" height="${Math.max(1, barH)}"></rect>`;
     }).join("")}
-    ${labels.map((p, i) => `<text class="chart-text" x="${[pad.left, width / 2 - 34, width - pad.right - 64][i]}" y="${height - 12}">${fmtTime(p.time)}</text>`).join("")}
+    ${labels.map((p, i) => `<text class="chart-text" x="${[pad.left, width / 2 - 34, width - pad.right - 64][i]}" y="${height - 12}">${chartTimeLabel(p)}</text>`).join("")}
   `;
 }
 
@@ -229,6 +241,13 @@ function render(data) {
   drawLine($("humidityChart"), points, "humidity", "%", "line-humidity", "#256d85");
   drawBars($("rainChart"), points);
   drawLine($("pressureChart"), pressure.points || [], "pressure", "hPa", "line-pressure", "#6f3aa8");
+
+  const images = data.cwaImages || {};
+  setImage("radar", images.radar);
+  setImage("satellite", images.satellite);
+  setImage("rainDaily", images.rainDaily);
+  const imageTimes = [images.radar?.time, images.satellite?.time, images.rainDaily?.time].filter((item) => item && item !== "-");
+  setText("imageUpdated", imageTimes.length ? `圖資時間 ${imageTimes.join(" / ")}` : "--");
 
   $("forecastBody").innerHTML = (data.forecast72 || []).map((f) => `
     <tr class="${f.is24hr ? "within24" : ""}">
